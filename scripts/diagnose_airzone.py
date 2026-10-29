@@ -135,13 +135,19 @@ async def main():
                     if client.connected:
                         await client.disconnect()
 
-            if args.reconnect_test:
-                await connect_once(start + args.minutes * 30)
-                if time.monotonic() < deadline:
+            forced_at = start + args.minutes * 30 if args.reconnect_test else None
+            forced_done = False
+            while time.monotonic() < deadline:
+                segment_end = forced_at if forced_at is not None and not forced_done else deadline
+                await connect_once(segment_end)
+                if time.monotonic() >= deadline:
+                    break
+                if forced_at is not None and not forced_done and time.monotonic() >= forced_at:
+                    forced_done = True
                     print("Forced reconnect test")
-                    await connect_once(deadline)
-            else:
-                await connect_once(deadline)
+                else:
+                    print("Connection ended early; retrying in 3 seconds")
+                    await asyncio.sleep(min(3, max(0, deadline - time.monotonic())))
     except Exception as exc:
         record_error("http", exc)
     finally:
