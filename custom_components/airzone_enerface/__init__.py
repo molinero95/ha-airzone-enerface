@@ -1,6 +1,8 @@
 """Experimental Airzone Enerface cloud integration."""
 import asyncio
 import logging
+import time
+import random
 from urllib.parse import quote
 
 import aiohttp
@@ -14,7 +16,7 @@ PLATFORMS = ["sensor"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
-    state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": [], "installation_ids": []}
+    state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": [], "installation_ids": [], "ws_ids": {}}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = state
 
     def notify():
@@ -48,10 +50,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         is_new = device_id not in state["devices"]
         state["devices"][device_id] = status
+        if isinstance(data.get("ws_id"), str):
+            state["ws_ids"][device_id] = data["ws_id"]
         if is_new:
             for callback in list(state["device_listeners"]):
                 callback(device_id)
         notify()
+
+    @client.on("*")
+    async def on_dynamic_event(event, *args):
+        """Socket.IO names updates using controller and device identifiers."""
+        if not event.startswith("DEVICES_UPDATE."):
+            return
+        parts = event.split(".")
+        if len(parts) != 3:
+            return
+        _, ws_id, device_id = parts
+        if state["ws_ids"].get(device_id) != ws_id:
+            return
+        if not args or not isinstance(args[0], dict):
+            return
+        update = args[0]
+        if update.get("device_id") not in (None, device_id):
+            return
+        change = update.get("change", {})
+        if not isinstance(change, dict):
+            return
+        status = change.get("status", {})
+        if isinstance(status, dict):
+            state["devices"][device_id].update(status)
+            notify()
 
     async def login(session):
         async with session.post(
@@ -83,12 +111,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Airzone returned a partial installations list; pagination is not implemented")
         return ids
 
+    async def refresh(session, refresh_token):
+        async with session.get(
+            "https://app.airzonecloud.com/api/v1/auth/refreshToken/" + refresh_token,
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+        token = payload.get("token")
+        new_refresh = payload.get("refreshToken")
+        if not isinstance(token, str) or not token or not isinstance(new_refresh, str) or not new_refresh:
+            raise ValueError("Unexpected Airzone refresh response")
+        return token, new_refresh
+
     async def connect_loop():
         async with aiohttp.ClientSession() as session:
+            token = None
+            refresh_token = None
+            retry = 0
             while True:
                 try:
-                    token = await login(session)
+                    if refresh_token:
+                        try:
+                            token, refresh_token = await refresh(session, refresh_token)
+                        except aiohttp.ClientResponseError as exc:
+                            if exc.status not in (401, 403):
+                                raise
+                            token = None
+                            refresh_token = None
+                    if not token:
+                        async with session.post(
+                            LOGIN_URL,
+                            json={"email": entry.data[CONF_EMAIL], "password": entry.data[CONF_PASSWORD]},
+                            timeout=aiohttp.ClientTimeout(total=20),
+                        ) as response:
+                            response.raise_for_status()
+                            payload = await response.json()
+                        token = payload["token"]
+                        refresh_token = payload.get("refreshToken")
                     state["installation_ids"] = await discover_installations(session, token)
+                    retry = 0
                     url = WS_HOST + "?jwt=" + quote(token, safe="")
                     await client.connect(
                         url,
@@ -100,13 +162,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    retry = min(retry + 1, 7)
                     _LOGGER.warning("Airzone cloud connection failed (%s); retrying", type(exc).__name__)
                 finally:
                     if client.connected:
                         await client.disconnect()
                     state["available"] = False
                     notify()
-                await asyncio.sleep(30)
+                await asyncio.sleep(min(300, 5 * 2 ** retry) + random.uniform(0, 3))
 
     state["task"] = entry.async_create_background_task(hass, connect_loop(), "Enerface websocket")
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
