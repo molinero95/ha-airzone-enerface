@@ -11,6 +11,7 @@ from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, LOGIN_URL, WS_HOST, WS_PAT
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
+CONF_INSTALLATION_ID = "installation_id"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
@@ -25,6 +26,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def connect():
         state["available"] = True
         notify()
+        await client.call("clear_listeners", timeout=10)
+        await client.call("listen_installation", entry.data[CONF_INSTALLATION_ID], timeout=10)
 
     @client.event
     async def disconnect():
