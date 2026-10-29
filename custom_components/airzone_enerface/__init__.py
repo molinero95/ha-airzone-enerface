@@ -14,6 +14,15 @@ from .state import apply_device_state, apply_device_update
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
+
+class AirzoneRequestError(Exception):
+    """HTTP failure with a safe operation label and status, no URLs or tokens."""
+
+    def __init__(self, stage: str, status: int) -> None:
+        self.stage = stage
+        self.status = status
+        super().__init__(f"{stage}: HTTP {status}")
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
     state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": [], "installation_ids": [], "ws_ids": {}}
@@ -70,7 +79,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             headers={"Authorization": f"Bearer {token}"},
             timeout=aiohttp.ClientTimeout(total=20),
         ) as response:
-            response.raise_for_status()
+            if response.status >= 400:
+                raise AirzoneRequestError("installation discovery", response.status)
             payload = await response.json()
         installations = payload.get("installations", [])
         if not isinstance(installations, list):
@@ -85,7 +95,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "https://app.airzonecloud.com/api/v1/auth/refreshToken/" + quote(refresh_token, safe=""),
             timeout=aiohttp.ClientTimeout(total=20),
         ) as response:
-            response.raise_for_status()
+            if response.status >= 400:
+                raise AirzoneRequestError("token refresh", response.status)
             payload = await response.json()
         token = payload.get("token")
         new_refresh = payload.get("refreshToken")
@@ -103,7 +114,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if refresh_token:
                         try:
                             token, refresh_token = await refresh(session, refresh_token)
-                        except aiohttp.ClientResponseError as exc:
+                        except AirzoneRequestError as exc:
                             if exc.status not in (401, 403):
                                 raise
                             token = None
@@ -114,7 +125,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             json={"email": entry.data[CONF_EMAIL], "password": entry.data[CONF_PASSWORD]},
                             timeout=aiohttp.ClientTimeout(total=20),
                         ) as response:
-                            response.raise_for_status()
+                            if response.status >= 400:
+                                raise AirzoneRequestError("login", response.status)
                             payload = await response.json()
                         token = payload.get("token")
                         if not isinstance(token, str) or not token:
@@ -132,6 +144,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     await client.wait()
                 except asyncio.CancelledError:
                     raise
+                except AirzoneRequestError as exc:
+                    retry = min(retry + 1, 7)
+                    _LOGGER.warning("Airzone Cloud %s failed (HTTP %s); retrying", exc.stage, exc.status)
                 except Exception as exc:
                     retry = min(retry + 1, 7)
                     _LOGGER.warning("Airzone cloud connection failed (%s); retrying", type(exc).__name__)
