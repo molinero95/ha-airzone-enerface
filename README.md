@@ -1,41 +1,38 @@
 # Airzone Enerface for Home Assistant
 
-**Experimental, unofficial integration. Not affiliated with Airzone.**
+Experimental, unofficial integration. Not affiliated with Airzone.
 
-Connect an Airzone Enerface energy clamp to Home Assistant using the Airzone Cloud Socket.IO stream. The implementation is an early prototype based on observed web-app traffic; **it has not yet been validated against a running Home Assistant instance**.
+## Prototype capabilities
 
-## Current scope
+- Config flow for Airzone Cloud email, password, and energy clamp device ID
+- Automatic login through the observed Airzone Cloud endpoint
+- Socket.IO connection with JWT query authentication
+- Power (W), current (A), and voltage (V) from `DEVICE_STATE`
+- Re-login after disconnection
 
-- Configuration flow for a device ID and a temporary access JWT
-- Socket.IO `DEVICE_STATE` event listener, filtered by device ID
-- Live power (W), current (A), and voltage (V) sensors
-- Reconnection attempts and device availability tracking
+## Installation (development only)
 
-## Not implemented yet
+Copy `custom_components/airzone_enerface` to Home Assistant's `config/custom_components/`, restart, and add **Airzone Enerface** from Settings → Devices & services.
 
-- Username/password login and secure refresh-token rotation
-- Daily/hourly energy via `/api/v1/bg/energy`
-- Energy dashboard compatible cumulative kWh sensor
-- Verified Socket.IO handshake and authentication parameters
-- Automated tests and release packaging
+The integration has **not been tested with a live Home Assistant installation**. The Socket.IO handshake and authentication still require validation. Credentials are stored in Home Assistant's config-entry storage, not in the repository. Protect your Home Assistant backups. Do not share passwords, JWTs, refresh tokens, or full WebSocket URLs in issues.
 
-## Experimental manual installation
+## Known limitations
 
-Copy `custom_components/airzone_enerface` to the Home Assistant `config/custom_components/` directory, restart Home Assistant, then add **Airzone Enerface** under Settings → Devices & services. Enter the energy clamp's device ID and a valid short-lived access token. **Do not paste credentials into GitHub issues.**
-
-**Known limitation:** The browser WebSocket URL uses a `jwt` query parameter, but the prototype currently sends a Bearer authorization header. This authentication path has not been confirmed to work. Tokens expire, and refresh is not implemented. Treat this as source code for development, not a stable installation.
-
-## Security
-
-Never commit access tokens, refresh tokens, passwords, installation IDs, personal data, or captured full WebSocket URLs. If you have exposed an active JWT, revoke it if possible.
+- No refresh-token endpoint has been verified; the prototype logs in again after disconnecting.
+- A server that keeps the WebSocket connected beyond JWT expiry may require proactive reconnect logic.
+- Daily/hourly kWh and Energy dashboard support are not yet implemented.
+- No automated test suite yet.
+- Repeated authentication failures currently retry every 30 seconds; this needs backoff before general release.
+- No public HACS release yet.
 
 ## Roadmap
 
-1. Validate Socket.IO connection and JWT authentication without leaking tokens in logs.
-2. Discover and implement refresh-token endpoint.
-3. Add daily/hourly energy API and energy dashboard support.
-4. Add tests, translations, diagnostics, and HACS release workflow.
+1. Validate authentication and Socket.IO handshake.
+2. Add credential validation and exponential retry backoff.
+3. Identify and implement refresh-token flow.
+4. Add daily energy API and cumulative kWh sensor.
+5. Add tests, translations, diagnostics, and release automation.
 
 ## License
 
-MIT (see LICENSE).
+MIT (license file pending).
