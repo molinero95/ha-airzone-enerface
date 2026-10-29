@@ -11,11 +11,10 @@ from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, LOGIN_URL, WS_HOST, WS_PAT
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
-CONF_INSTALLATION_ID = "installation_id"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
-    state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": []}
+    state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": [], "installation_ids": []}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = state
 
     def notify():
@@ -27,7 +26,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["available"] = True
         notify()
         await client.call("clear_listeners", timeout=10)
-        await client.call("listen_installation", entry.data[CONF_INSTALLATION_ID], timeout=10)
+        for installation_id in state["installation_ids"]:
+            await client.call("listen_installation", installation_id, timeout=10)
 
     @client.event
     async def disconnect():
@@ -62,11 +62,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 raise ValueError("Airzone login response has no access token")
             return token
 
+    async def discover_installations(session, token):
+        async with session.get(
+            "https://app.airzonecloud.com/api/v1/installations",
+            params={"items": 100},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+        installations = payload.get("installations", [])
+        if not isinstance(installations, list):
+            raise ValueError("Unexpected Airzone installations response")
+        ids = [item["installation_id"] for item in installations if isinstance(item, dict) and isinstance(item.get("installation_id"), str)]
+        if payload.get("total", len(ids)) > len(ids):
+            _LOGGER.warning("Airzone returned a partial installations list; pagination is not implemented")
+        return ids
+
     async def connect_loop():
         async with aiohttp.ClientSession() as session:
             while True:
                 try:
                     token = await login(session)
+                    state["installation_ids"] = await discover_installations(session, token)
                     url = WS_HOST + "?jwt=" + quote(token, safe="")
                     await client.connect(
                         url,
