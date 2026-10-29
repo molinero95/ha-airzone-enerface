@@ -1,8 +1,13 @@
-"""Standalone Airzone Cloud diagnostics. Never print credentials or tokens."""
+"""Long-running Airzone diagnostics. Never log credentials, tokens or device IDs."""
+import argparse
 import asyncio
 import getpass
 import json
 import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
 
 import aiohttp
 import socketio
@@ -13,76 +18,160 @@ PATH = "api/v1/websockets/conn"
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Monitor Airzone websocket stability")
+    parser.add_argument("--minutes", type=float, default=60)
+    parser.add_argument("--output", default="airzone-diagnostics.json")
+    parser.add_argument("--reconnect-test", action="store_true",
+                        help="Force a reconnect halfway through the run")
+    args = parser.parse_args()
+    if not 0 < args.minutes <= 1440:
+        parser.error("--minutes must be between 0 and 1440")
+    start = time.monotonic()
+    deadline = start + args.minutes * 60
+    report = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "duration_minutes": args.minutes,
+        "connections": 0, "disconnects": 0, "energy_events": 0,
+        "updates": 0, "max_event_gap_seconds": None,
+        "subscription_results": [], "errors": [], "reconnect_test": args.reconnect_test,
+    }
+    last_event = None
+    monitoring_started = None
+
+    def record_error(stage, exc):
+        # Exception messages may include sensitive URLs. Store only class names.
+        report["errors"].append({"stage": stage, "type": type(exc).__name__})
+        print(f"{stage}: {type(exc).__name__} (details hidden)")
+
+    def record_event():
+        nonlocal last_event
+        now = time.monotonic()
+        if last_event is not None:
+            gap = round(now - last_event, 2)
+            report["max_event_gap_seconds"] = max(report["max_event_gap_seconds"] or 0, gap)
+        last_event = now
+
     email = os.environ.get("AIRZONE_EMAIL") or input("Airzone email: ").strip()
     password = os.environ.get("AIRZONE_PASSWORD") or getpass.getpass("Airzone password: ")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
-        try:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
             async with session.post(BASE + "/auth/login", json={"email": email, "password": password}) as response:
                 print(f"Login HTTP {response.status}")
                 if response.status != 200:
                     return
-                body = await response.json()
-                token = body.get("token")
+                token = (await response.json()).get("token")
                 if not isinstance(token, str) or not token:
-                    print("Login response lacks a valid token")
+                    print("Missing token")
                     return
-            print("Authentication successful (token hidden)")
-            installation_ids = []
-            for items in (9, 100):
-                async with session.get(
-                    BASE + "/installations",
-                    params={"items": items},
-                    headers={"Authorization": f"Bearer {token}"},
-                ) as response:
-                    print(f"Installations items={items}: HTTP {response.status}")
-                    if response.status != 200:
-                        continue
-                    payload = await response.json()
-                    installation_ids = [
-                        item["installation_id"] for item in payload.get("installations", [])
-                        if isinstance(item, dict) and isinstance(item.get("installation_id"), str)
-                    ]
-                    print(f"Installations found: {len(installation_ids)}")
-                    break
-            if not installation_ids:
-                print("No installations discovered; skipping websocket test")
+            async with session.get(
+                BASE + "/installations", params={"items": 9},
+                headers={"Authorization": f"Bearer {token}"},
+            ) as response:
+                print(f"Installations HTTP {response.status}")
+                if response.status != 200:
+                    return
+                installations = (await response.json()).get("installations", [])
+                ids = [item["installation_id"] for item in installations
+                       if isinstance(item, dict) and isinstance(item.get("installation_id"), str)]
+            print(f"Installations found: {len(ids)}")
+            if not ids:
                 return
-            client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
-            found = asyncio.Event()
 
-            @client.event
-            async def connect():
-                print("WebSocket connected")
+            async def connect_once(run_until):
+                client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
+                @client.event
+                async def connect():
+                    nonlocal monitoring_started
+                    if monitoring_started is None:
+                        monitoring_started = time.monotonic()
+                    report["connections"] += 1
+                    print("WebSocket connected")
 
-            @client.on("DEVICE_STATE")
-            async def device_state(payload):
-                if isinstance(payload, dict) and payload.get("device_type") == "az_energy_clamp":
-                    status = payload.get("status") or {}
-                    print("Enerface received: " + json.dumps({
-                        key: status.get(key) for key in ("power_total", "current_total", "voltage_total")
-                    }))
-                    found.set()
+                @client.event
+                async def disconnect():
+                    report["disconnects"] += 1
+                    print("WebSocket disconnected")
 
-            try:
-                await client.connect(
-                    WS + "?jwt=" + token,
-                    socketio_path=PATH,
-                    transports=["websocket"],
-                    wait_timeout=15,
-                )
-                await client.emit("ready")
-                await client.call("clear_listeners", timeout=10)
-                for installation_id in installation_ids:
-                    await client.call("listen_installation", installation_id, timeout=10)
+                @client.on("auth")
+                async def on_auth(action):
+                    if action == "authenticate":
+                        return token
+                    return None
+
+                @client.on("DEVICE_STATE")
+                async def device_state(payload):
+                    if isinstance(payload, dict) and payload.get("device_type") == "az_energy_clamp":
+                        report["energy_events"] += 1
+                        record_event()
+
+                @client.on("*")
+                async def dynamic_event(event, *payload):
+                    if isinstance(event, str) and event.startswith("DEVICES_UPDATE."):
+                        report["updates"] += 1
+                        record_event()
+
                 try:
-                    await asyncio.wait_for(found.wait(), timeout=20)
-                except asyncio.TimeoutError:
-                    print("No Enerface DEVICE_STATE within 20 seconds")
-            finally:
-                if client.connected:
-                    await client.disconnect()
-        except (aiohttp.ClientError, asyncio.TimeoutError, socketio.exceptions.SocketIOError) as exc:
-            print(f"Diagnostic failed: {type(exc).__name__} (details hidden to protect tokens)")
+                    await client.connect(
+                        WS + "?jwt=" + quote(token, safe=""),
+                        socketio_path=PATH, transports=["websocket"], wait_timeout=15,
+                    )
+                    await client.emit("ready")
+                    for stage, installation_id in [
+                        ("clear_listeners", None),
+                        *[("listen_installation", item) for item in ids],
+                    ]:
+                        started = time.monotonic()
+                        try:
+                            if installation_id is None:
+                                await client.call(stage, timeout=20)
+                            else:
+                                await client.call(stage, installation_id, timeout=20)
+                            result = "ok"
+                        except Exception as exc:
+                            result = type(exc).__name__
+                            record_error(stage, exc)
+                        report["subscription_results"].append({
+                            "stage": stage, "result": result,
+                            "elapsed_seconds": round(time.monotonic() - started, 2),
+                        })
+                        print(f"{stage}: {result}")
+                        if result != "ok":
+                            return
+                    while client.connected and time.monotonic() < run_until:
+                        await asyncio.sleep(min(5, max(0, run_until - time.monotonic())))
+                except Exception as exc:
+                    record_error("connection", exc)
+                finally:
+                    if client.connected:
+                        await client.disconnect()
+
+            forced_at = start + args.minutes * 30 if args.reconnect_test else None
+            forced_done = False
+            while time.monotonic() < deadline:
+                segment_end = forced_at if forced_at is not None and not forced_done else deadline
+                await connect_once(segment_end)
+                if time.monotonic() >= deadline:
+                    break
+                if forced_at is not None and not forced_done and time.monotonic() >= forced_at:
+                    forced_done = True
+                    print("Forced reconnect test")
+                else:
+                    print("Connection ended early; retrying in 3 seconds")
+                    await asyncio.sleep(min(3, max(0, deadline - time.monotonic())))
+    except Exception as exc:
+        record_error("http", exc)
+    finally:
+        report["ended_at"] = datetime.now(timezone.utc).isoformat()
+        end = time.monotonic()
+        report["trailing_silence_seconds"] = round(end - last_event, 2) if last_event is not None else None
+        if last_event is not None:
+            report["max_event_gap_seconds"] = max(report["max_event_gap_seconds"] or 0, report["trailing_silence_seconds"])
+        elif monitoring_started is not None:
+            report["max_event_gap_seconds"] = round(end - monitoring_started, 2)
+        report["actual_duration_seconds"] = round(end - start, 2)
+        # Only aggregate statistics and operation labels; never raw payloads.
+        Path(args.output).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(f"Report saved: {args.output}")
 
 
 if __name__ == "__main__":
