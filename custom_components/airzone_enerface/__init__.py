@@ -1,7 +1,6 @@
 """Experimental Airzone Enerface cloud integration."""
 import asyncio
 import logging
-import time
 import random
 from urllib.parse import quote
 
@@ -81,19 +80,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             state["devices"][device_id].update(status)
             notify()
 
-    async def login(session):
-        async with session.post(
-            LOGIN_URL,
-            json={"email": entry.data[CONF_EMAIL], "password": entry.data[CONF_PASSWORD]},
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as response:
-            response.raise_for_status()
-            payload = await response.json()
-            token = payload.get("token")
-            if not isinstance(token, str) or not token:
-                raise ValueError("Airzone login response has no access token")
-            return token
-
     async def discover_installations(session, token):
         async with session.get(
             "https://app.airzonecloud.com/api/v1/installations",
@@ -113,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def refresh(session, refresh_token):
         async with session.get(
-            "https://app.airzonecloud.com/api/v1/auth/refreshToken/" + refresh_token,
+            "https://app.airzonecloud.com/api/v1/auth/refreshToken/" + quote(refresh_token, safe=""),
             timeout=aiohttp.ClientTimeout(total=20),
         ) as response:
             response.raise_for_status()
@@ -147,7 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         ) as response:
                             response.raise_for_status()
                             payload = await response.json()
-                        token = payload["token"]
+                        token = payload.get("token")
+                        if not isinstance(token, str) or not token:
+                            raise ValueError("Airzone login response has no token")
                         refresh_token = payload.get("refreshToken")
                     state["installation_ids"] = await discover_installations(session, token)
                     retry = 0
