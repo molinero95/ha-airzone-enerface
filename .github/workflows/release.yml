@@ -1,0 +1,80 @@
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate integration
+        run: |
+          python -m compileall -q custom_components
+          python -m pip install pytest
+          python -m pytest -q tests
+      - name: Select version and update manifest if needed
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          path = Path("custom_components/airzone_enerface/manifest.json")
+          manifest = json.loads(path.read_text())
+          current = manifest["version"]
+          if not re.fullmatch(r"0|[1-9]\d*\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", current):
+              raise SystemExit(f"Invalid semantic version: {current}")
+          existing = subprocess.check_output(["git", "tag", "--list", "v*"], text=True).splitlines()
+          versions = [tuple(map(int, tag[1:].split("."))) for tag in existing if re.fullmatch(r"v\d+\.\d+\.\d+", tag)]
+          latest = max(versions, default=None)
+          proposed = tuple(map(int, current.split(".")))
+          if latest is not None and proposed <= latest:
+              proposed = (latest[0], latest[1], latest[2] + 1)
+              manifest["version"] = ".".join(map(str, proposed))
+              path.write_text(json.dumps(manifest, indent=2) + "\n")
+          version = ".".join(map(str, proposed))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PY
+      - name: Commit version bump if needed
+        run: |
+          if ! git diff --quiet -- custom_components/airzone_enerface/manifest.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add custom_components/airzone_enerface/manifest.json
+            git commit -m "chore: release v${{ steps.version.outputs.version }}"
+            git push origin HEAD:main
+          fi
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="v${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists; skipping"
+            exit 0
+          fi
+          git tag "${tag}"
+          git push origin "${tag}"
+          gh release create "${tag}" --title "${tag}" --generate-notes --verify-tag
