@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar con Airzone Cloud",
+        "data": {
+          "email": "Correo electrónico",
+          "password": "Contraseña",
+          "name": "Nombre"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Actualizar credenciales de Airzone Cloud",
+        "data": {
+          "email": "Correo electrónico",
+          "password": "Contraseña",
+          "name": "Nombre"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Correo o contraseña incorrectos",
+      "cannot_connect": "No se puede conectar con Airzone Cloud",
+      "invalid_response": "Respuesta inesperada de Airzone Cloud"
+    },
+    "abort": {
+      "already_configured": "La cuenta ya está configurada",
+      "reauth_successful": "Credenciales actualizadas correctamente"
+    }
+  }
+}
