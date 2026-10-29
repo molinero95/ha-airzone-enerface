@@ -40,7 +40,7 @@ The script prompts for credentials and checks login, installation listing, Socke
 
 ## Releases and tags
 
-GitHub Actions workflow `.github/workflows/release.yml` is designed to run tests, update `manifest.json`, create semantic-version tags (`v0.1.0`, `v0.1.1`, etc.), and publish GitHub Releases when changes land on `main`. Publication requires GitHub Actions **Contents: write** permissions and a branch policy allowing the bot to push version commits. Verify actual publication in [Releases](https://github.com/molinero95/ha-airzone-enerface/releases) and [Actions](https://github.com/molinero95/ha-airzone-enerface/actions).
+GitHub Actions workflow `.github/workflows/release.yml` runs tests and publishes a semantic-version tag and GitHub Release when a PR with a **new version in `manifest.json`** is merged into `main`. It never pushes commits to protected `main`. For a new release, update `custom_components/airzone_enerface/manifest.json` (for example, `0.1.1`) in the PR before merging. If that version's tag already exists, the workflow skips publication. GitHub Actions needs **Contents: write** permission to create tags and releases. Verify actual publication in [Releases](https://github.com/molinero95/ha-airzone-enerface/releases) and [Actions](https://github.com/molinero95/ha-airzone-enerface/actions).
 
 ## Development and tests
 
