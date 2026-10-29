@@ -1,7 +1,7 @@
 {
   "domain": "airzone_enerface",
   "name": "Airzone Enerface",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "documentation": "https://github.com/molinero95/ha-airzone-enerface",
   "issue_tracker": "https://github.com/molinero95/ha-airzone-enerface/issues",
   "codeowners": [],
