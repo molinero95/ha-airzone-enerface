@@ -4,6 +4,8 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD
 
+CONF_INSTALLATION_ID = "installation_id"
+
 class EnerfaceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
 
@@ -20,6 +22,7 @@ class EnerfaceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_EMAIL): str,
                 vol.Required(CONF_PASSWORD): str,
+                vol.Required(CONF_INSTALLATION_ID): str,
                 vol.Optional(CONF_NAME, default="Airzone Enerface"): str,
             }),
         )
