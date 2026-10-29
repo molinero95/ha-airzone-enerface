@@ -7,14 +7,14 @@ import aiohttp
 import socketio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, CONF_DEVICE_ID, LOGIN_URL, WS_HOST, WS_PATH
+from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, LOGIN_URL, WS_HOST, WS_PATH
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
-    state = {"status": {}, "available": False, "client": client, "listeners": []}
+    state = {"devices": {}, "available": False, "client": client, "listeners": [], "device_listeners": []}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = state
 
     def notify():
@@ -33,12 +33,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @client.on("DEVICE_STATE")
     async def device_state(data):
-        if not isinstance(data, dict) or data.get("device_id") != entry.data[CONF_DEVICE_ID]:
+        if not isinstance(data, dict) or data.get("device_type") != "az_energy_clamp":
             return
+        device_id = data.get("device_id")
         status = data.get("status")
-        if isinstance(status, dict):
-            state["status"] = status
-            notify()
+        if not isinstance(device_id, str) or not device_id or not isinstance(status, dict):
+            return
+        is_new = device_id not in state["devices"]
+        state["devices"][device_id] = status
+        if is_new:
+            for callback in list(state["device_listeners"]):
+                callback(device_id)
+        notify()
 
     async def login(session):
         async with session.post(
