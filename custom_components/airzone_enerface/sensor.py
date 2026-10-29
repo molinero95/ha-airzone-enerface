@@ -1,6 +1,7 @@
 """Dynamic sensors for automatically discovered Airzone energy clamps."""
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfElectricCurrent, UnitOfElectricPotential, UnitOfPower, UnitOfEnergy
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.components.sensor import RestoreSensor
 from datetime import timedelta
@@ -115,6 +116,7 @@ class EnerfaceEnergySensor(RestoreSensor):
         ))
         self._update_and_write()
 
+    @callback
     def _periodic_update(self, now):
         self._update_and_write()
 
