@@ -36,6 +36,7 @@ async def main():
         "subscription_results": [], "errors": [], "reconnect_test": args.reconnect_test,
     }
     last_event = None
+    monitoring_started = None
 
     def record_error(stage, exc):
         # Exception messages may include sensitive URLs. Store only class names.
@@ -80,6 +81,9 @@ async def main():
                 client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
                 @client.event
                 async def connect():
+                    nonlocal monitoring_started
+                    if monitoring_started is None:
+                        monitoring_started = time.monotonic()
                     report["connections"] += 1
                     print("WebSocket connected")
 
@@ -158,6 +162,13 @@ async def main():
         record_error("http", exc)
     finally:
         report["ended_at"] = datetime.now(timezone.utc).isoformat()
+        end = time.monotonic()
+        report["trailing_silence_seconds"] = round(end - last_event, 2) if last_event is not None else None
+        if last_event is not None:
+            report["max_event_gap_seconds"] = max(report["max_event_gap_seconds"] or 0, report["trailing_silence_seconds"])
+        elif monitoring_started is not None:
+            report["max_event_gap_seconds"] = round(end - monitoring_started, 2)
+        report["actual_duration_seconds"] = round(end - start, 2)
         # Only aggregate statistics and operation labels; never raw payloads.
         Path(args.output).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(f"Report saved: {args.output}")
