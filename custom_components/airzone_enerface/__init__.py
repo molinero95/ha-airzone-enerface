@@ -71,6 +71,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         state["available"] = False
         notify()
 
+    @client.on("auth")
+    async def on_auth(action):
+        if action == "authenticate":
+            return state.get("jwt")
+        return None
+
     @client.on("DEVICE_STATE")
     async def device_state(data):
         previous = set(state["devices"])
@@ -150,6 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         refresh_token = payload.get("refreshToken")
                     state["installation_ids"] = await discover_installations(session, token)
                     retry = 0
+                    state["jwt"] = token
                     url = WS_HOST + "?jwt=" + quote(token, safe="")
                     await client.connect(
                         url,
@@ -170,6 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if client.connected:
                         await client.disconnect()
                     state["available"] = False
+                    state["jwt"] = None
                     notify()
                 await asyncio.sleep(min(300, 5 * 2 ** retry) + random.uniform(0, 3))
 
