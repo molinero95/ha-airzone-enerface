@@ -86,7 +86,8 @@ class EnerfaceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = error
             else:
                 await self.async_set_unique_id(email)
-                self._abort_if_unique_id_configured()
+                if email != self._reauth_entry.unique_id:
+                    self._abort_if_unique_id_configured()
                 return self.async_update_reload_and_abort(
                     self._reauth_entry,
                     data_updates={CONF_EMAIL: email, CONF_PASSWORD: user_input[CONF_PASSWORD]},
