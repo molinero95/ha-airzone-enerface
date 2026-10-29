@@ -9,6 +9,7 @@ import socketio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .const import DOMAIN, CONF_EMAIL, CONF_PASSWORD, LOGIN_URL, WS_HOST, WS_PATH
+from .state import apply_device_state, apply_device_update
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
@@ -41,17 +42,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @client.on("DEVICE_STATE")
     async def device_state(data):
-        if not isinstance(data, dict) or data.get("device_type") != "az_energy_clamp":
+        previous = set(state["devices"])
+        device_id = apply_device_state(state["devices"], state["ws_ids"], data)
+        if device_id is None:
             return
-        device_id = data.get("device_id")
-        status = data.get("status")
-        if not isinstance(device_id, str) or not device_id or not isinstance(status, dict):
-            return
-        is_new = device_id not in state["devices"]
-        state["devices"][device_id] = status
-        if isinstance(data.get("ws_id"), str):
-            state["ws_ids"][device_id] = data["ws_id"]
-        if is_new:
+        if device_id not in previous:
             for callback in list(state["device_listeners"]):
                 callback(device_id)
         notify()
@@ -59,25 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @client.on("*")
     async def on_dynamic_event(event, *args):
         """Socket.IO names updates using controller and device identifiers."""
-        if not event.startswith("DEVICES_UPDATE."):
-            return
-        parts = event.split(".")
-        if len(parts) != 3:
-            return
-        _, ws_id, device_id = parts
-        if state["ws_ids"].get(device_id) != ws_id:
-            return
-        if not args or not isinstance(args[0], dict):
-            return
-        update = args[0]
-        if update.get("device_id") not in (None, device_id):
-            return
-        change = update.get("change", {})
-        if not isinstance(change, dict):
-            return
-        status = change.get("status", {})
-        if isinstance(status, dict):
-            state["devices"][device_id].update(status)
+        if args and apply_device_update(state["devices"], state["ws_ids"], event, args[0]):
             notify()
 
     async def discover_installations(session, token):
