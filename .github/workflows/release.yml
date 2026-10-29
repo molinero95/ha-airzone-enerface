@@ -42,7 +42,7 @@ jobs:
           path = Path("custom_components/airzone_enerface/manifest.json")
           manifest = json.loads(path.read_text())
           current = manifest["version"]
-          if not re.fullmatch(r"0|[1-9]\d*\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", current):
+          if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", current):
               raise SystemExit(f"Invalid semantic version: {current}")
           existing = subprocess.check_output(["git", "tag", "--list", "v*"], text=True).splitlines()
           versions = [tuple(map(int, tag[1:].split("."))) for tag in existing if re.fullmatch(r"v\d+\.\d+\.\d+", tag)]
