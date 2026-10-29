@@ -40,12 +40,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # needs to finish dispatching the connection event first.
         async def subscribe():
             await client.emit("ready")
-            await client.call("clear_listeners", timeout=10)
-            for installation_id in state["installation_ids"]:
-                await client.call("listen_installation", installation_id, timeout=10)
+            for stage, installation_id in [
+                ("clear_listeners", None),
+                *[("listen_installation", item) for item in state["installation_ids"]],
+            ]:
+                try:
+                    if installation_id is None:
+                        await client.call(stage, timeout=20)
+                    else:
+                        await client.call(stage, installation_id, timeout=20)
+                except (asyncio.TimeoutError, socketio.exceptions.TimeoutError):
+                    _LOGGER.warning(
+                        "Airzone subscription acknowledgement timed out at %s (20s)",
+                        stage,
+                    )
+                    raise
+            _LOGGER.debug("Airzone subscription complete for %d installations", len(state["installation_ids"]))
         async def guarded_subscribe():
             try:
                 await subscribe()
+            except (asyncio.TimeoutError, socketio.exceptions.TimeoutError):
+                await client.disconnect()
             except Exception as exc:
                 _LOGGER.warning("Airzone subscription failed (%s)", type(exc).__name__)
                 await client.disconnect()
