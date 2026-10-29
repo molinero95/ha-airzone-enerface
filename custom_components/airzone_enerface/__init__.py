@@ -42,7 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         while True:
             try:
                 await client.connect(
-                    WS_URL,
+                    "https://prodctrl.airzonecloud.com",
                     socketio_path="api/v1/websockets/conn",
                     transports=["websocket"],
                     headers={"Authorization": f"Bearer {entry.data[CONF_TOKEN]}"},
