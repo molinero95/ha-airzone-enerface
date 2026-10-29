@@ -33,7 +33,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await client.call("clear_listeners", timeout=10)
             for installation_id in state["installation_ids"]:
                 await client.call("listen_installation", installation_id, timeout=10)
-        hass.async_create_task(subscribe(), "Enerface installation subscription")
+        async def guarded_subscribe():
+            try:
+                await subscribe()
+            except Exception as exc:
+                _LOGGER.warning("Airzone subscription failed (%s)", type(exc).__name__)
+                await client.disconnect()
+        hass.async_create_task(guarded_subscribe(), "Enerface installation subscription")
 
     @client.event
     async def disconnect():
