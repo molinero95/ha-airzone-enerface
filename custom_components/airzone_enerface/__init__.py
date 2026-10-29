@@ -39,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Do not await acknowledgements inside the connect callback: Socket.IO
         # needs to finish dispatching the connection event first.
         async def subscribe():
+            await client.emit("ready")
             await client.call("clear_listeners", timeout=10)
             for installation_id in state["installation_ids"]:
                 await client.call("listen_installation", installation_id, timeout=10)
