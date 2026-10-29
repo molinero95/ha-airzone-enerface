@@ -75,7 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def discover_installations(session, token):
         async with session.get(
             "https://app.airzonecloud.com/api/v1/installations",
-            params={"items": 100},
+            params={"items": 9},
             headers={"Authorization": f"Bearer {token}"},
             timeout=aiohttp.ClientTimeout(total=20),
         ) as response:
