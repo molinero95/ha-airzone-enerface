@@ -1,0 +1,13 @@
+{
+  "domain": "airzone_enerface",
+  "name": "Airzone Enerface",
+  "version": "0.1.0",
+  "documentation": "https://github.com/molinero95/ha-airzone-enerface",
+  "issue_tracker": "https://github.com/molinero95/ha-airzone-enerface/issues",
+  "codeowners": [],
+  "config_flow": true,
+  "requirements": [
+    "python-socketio[asyncio_client]>=5.11,<6"
+  ],
+  "iot_class": "cloud_push"
+}
