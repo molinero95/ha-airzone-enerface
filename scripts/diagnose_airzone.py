@@ -88,6 +88,12 @@ async def main():
                     report["disconnects"] += 1
                     print("WebSocket disconnected")
 
+                @client.on("auth")
+                async def on_auth(action):
+                    if action == "authenticate":
+                        return token
+                    return None
+
                 @client.on("DEVICE_STATE")
                 async def device_state(payload):
                     if isinstance(payload, dict) and payload.get("device_type") == "az_energy_clamp":
